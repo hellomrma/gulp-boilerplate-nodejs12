@@ -29,6 +29,21 @@ i {
     @include sp-retina('fork')
 }
 
+.svg-sprite-sample-01{
+  display: inline-block;
+  @include useSvg-sprite('user')
+}
+
+.svg-sprite-sample-02{
+  display: inline-block;
+  @include useSvg-sprite('favorite')
+}
+
+.svg-sprite-sample-03{
+  display: inline-block;
+  @include useSvg-sprite('refresh')
+}
+
 .vw-sample-text {
     background-color: lightcoral;
     color: #fff;

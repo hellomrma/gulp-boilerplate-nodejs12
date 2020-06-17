@@ -40,7 +40,10 @@
 		sassInlineSvg = require('gulp-sass-inline-svg'),
 		svgMin        = require('gulp-svgmin'),
 		base64Inline  = require('gulp-base64-inline'),
-		merge         = require('merge-stream');
+		merge         = require('merge-stream'),
+		$             = require('gulp-load-plugins')({
+			camelize: true
+		});
 
 
 	// Swipe Dist Folder
@@ -147,6 +150,7 @@
 		src    : dir.src + 'img/**/*',
 		dist   : dir.dist + 'img/',
 		svg    : dir.src + 'img/svg/*.svg',
+		svg2   : dir.src + 'img/sprites-svg/*.svg',
 		minOpts: {
 			optimizationLevel: 5
 		}
@@ -173,10 +177,70 @@
 			.pipe(svgMin())
 			.pipe(sassInlineSvg({
 				destDir: 'src/css/scss/svg'
-			}));
+			}))
 	}
 
-	exports.image = series(swipeImage, generateImages, inlineSVG);
+	function spriteSvg() {
+		const folder = `${dir.src}/img/sprites-svg`;
+
+		let options = {
+			spritesmith: (options) => {
+				const {
+					folder,
+					dir
+				} = options;
+				return {
+					shape: {
+						spacing: {
+							padding: 4
+						},
+						id: {
+							generator: function (name) {
+								return path.basename(name.split(`${dir.src}/css/sprites-data`).join(this.separator), '.svg');
+							}
+						}
+					},
+					mode: {
+						css: {
+							dest  : './',
+							bust  : false,
+							sprite: 'sprite-svg.svg',
+							render: {
+								scss: {
+									template: path.join(`${dir.src}/css/sprites-data`, 'sprite-svg-mixins.handlebars'),
+									dest    : path.posix.relative(`${dir.src}/img`, path.posix.join(`${dir.src}/css`, 'sprites-data', '_sprite-svg-mixins.scss'))
+								}
+							}
+						}
+					},
+					variables: {
+						spriteName: 'sprite',
+						baseName  : path.posix.relative(`${dir.src}/css`, path.posix.join(`${dir.src}/img`, 'sprite-svg')),
+						svgToPng  : ''
+					}
+				}
+			},
+		};
+
+		return src(path.join(`${dir.src}/img/sprites-svg`, '*.svg'))
+			.pipe($.sort())
+			.pipe($.svgSprite(options.spritesmith({
+				folder,
+				dir
+			})))
+			.pipe(dest(`${dir.src}/sprite-svg-temp/`))
+	}
+
+	function cloneSvgSprites() {
+		return src(dir.src + 'sprite-svg-temp/**/*.svg')
+			.pipe(dest(imgSetting.dist))
+	}
+
+	function removeTempSvgSprites() {
+		return del(dir.src + 'sprite-svg-temp');
+	}
+
+	exports.image = series(swipeImage, spriteSvg, cloneSvgSprites, removeTempSvgSprites, generateImages, inlineSVG);
 
 	// HTML
 	const htmlSetting = {
@@ -338,10 +402,10 @@
 
 	// CSS
 	const cssSetting = {
-		src   : dir.src + 'css/scss/**/*.*',
+		src     : dir.src + 'css/scss/**/*.scss',
 		dist    : dir.dist + 'css/',
 		libs    : dir.src + 'css/libs/**/*',
-		sprites : dir.src + 'css/scss/sprites/*.*',
+		sprites : dir.src + 'css/sprites-data/*.*',
 		sassOpts: {
 			sourceMap      : true,
 			outputStyle    : 'nested',
@@ -371,27 +435,27 @@
 	function generateSprite() {
 		var opts = {
 			spritesmith: function (options, sprite, icons) {
-				options.imgPath = `../img/sprites/${options.imgName}`;
-				options.cssName = `_${sprite}.scss`;
-				options.cssTemplate = `./src/css/sprites-data/spritesmith-mixins.handlebars`
+				options.imgPath            = `../img/sprites/${options.imgName}`;
+				options.cssName            = `_${sprite}.scss`;
+				options.cssTemplate        = `./src/css/sprites-data/spritesmith-mixins.handlebars`
 				options.cssSpritesheetName = sprite;
-				options.padding = 4;
-				options.algorithm = 'binary-tree';
+				options.padding            = 4;
+				options.algorithm          = 'binary-tree';
 				return options;
 			}
 		};
 		var spriteData = src('./src/img/sprites/**/*.png').pipe(spritesmith(opts)).on('error', function (err) {
 			console.log(err);
 		});
-	
+
 		var imgStream = spriteData.img.pipe(dest('./dist/img/sprites'));
 		var cssStream = spriteData.css.pipe(dest('./src/css/sprites-data'));
-	
+
 		return merge(imgStream, cssStream);
 	}
 
 	function compileSCSS() {
-		return src([cssSetting.src, '!' + cssSetting.sprites])
+		return src([cssSetting.src])
 			.pipe(sourcemaps.init())
 			.pipe(sass(cssSetting.sassOpts).on('error', sass.logError))
 			.pipe(postcss(cssSetting.postCSSdefault))
@@ -400,9 +464,6 @@
 				showFiles: true
 			}))
 			.pipe(dest(cssSetting.dist))
-			.pipe(browsersync.reload({
-				stream: true
-			}))
 	}
 
 	function minifyCSS() {
@@ -436,9 +497,15 @@
 	function watchingResources(done) {
 		watch(jsSetting.src, exports.js);
 		watch(fontsSetting.src, exports.font);
-		watch(imgSetting.src, exports.image);
+		watch(imgSetting.src, series(exports.image, exports.css, (done) => {
+			browsersync.reload();
+			done();
+		}));
 		watch(htmlSetting.src, exports.html);
-		watch(cssSetting.src, exports.css);
+		watch(cssSetting.src, series(exports.css, (done) => {
+			browsersync.reload();
+			done();
+		}));
 		done();
 	}
 
